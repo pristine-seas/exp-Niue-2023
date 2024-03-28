@@ -1,0 +1,136 @@
+---
+title: "RMI 2023 expedition report"
+subtitle: "Trip summary"
+author: "Juan Mayorga"
+number-sections: true
+date: today
+theme: cosmo
+format: 
+  html:
+    self-contained: true
+    code-fold: true
+    toc: true
+    toc-location: left
+---
+
+```{r, message=F, warning = F, fig.width=10, fig.height=10, echo = F}
+library(paletteer)
+library(sf)
+library(terra)
+library(tidyverse)
+library(bigrquery)
+
+knitr::opts_chunk$set(eval = F, warning = F, message = F, include = F, echo = F)
+
+PristineSeasR::set_ps_paths(email = "marine.data.science@ngs.org")
+
+exp_path <- file.path(ps_science_path, "expeditions", "Niue-2023")
+
+ps_data_path <- file.path(ps_science_path, "datasets/")
+
+bq_connection <- dbConnect(bigquery(), project = "pristine-seas")
+```
+
+# Fish 
+
+```{r uvs}
+uvs_meta <- readxl::read_xlsx(file.path(exp_path, 
+                                        "data/primary/raw/fish/NIU_2023_uvs_fish_fieldbook_AMF.xlsx")) |> 
+  as_tibble()
+
+uvs_meta <- uvs_meta |> 
+  mutate(expedition = "NIU_2023", 
+         uvs_station_id = str_replace(ps_site_id, "NIU", "NIU_2023") |>
+           str_replace("UVS", "uvs"),
+         date = lubridate::dmy(dd_mm_yyyy),
+         local_time = hms::as_hms(local_time),
+         alternative_site_id = formatC(as.numeric(alternative_site_id), flag = 0, width = 2),
+         alternative_site_id = if_else(!is.na(alternative_site_id) & alternative_site_id != "NA", 
+                                       paste0("NIU_2016_uvs_", alternative_site_id),
+                                       NA_character_)) |> 
+  select(expedition,  uvs_station_id, location = island, date, local_time, lat, lon,
+         habitat, exposure, team_lead, alternative_site_id, everything(), 
+         -dd_mm_yyyy, -sand_station_id, -sand_station_depth, -ps_site_id)
+```
+
+```{r fish}
+amf_fish_obs <- readxl::read_xlsx(file.path(exp_path, "data/primary/raw/fish/NIU_2023_uvs_fish_fieldbook_AMF.xlsx"),
+                               sheet = "fish_obs") |> 
+  as_tibble() 
+  
+jsm_fish_obs <- readxl::read_xlsx(file.path(exp_path, "data/primary/raw/fish/NIU_2023_uvs_fish_fieldbook_JSM.xlsx"),
+                               sheet = "fish_obs") |> 
+  as_tibble() 
+  
+fish_obs <- bind_rows(amf_fish_obs, jsm_fish_obs) |> 
+  mutate(uvs_station_id = str_replace(ps_site_id, "NIU", "NIU_2023") |>
+           str_replace("UVS", "uvs")) 
+
+fish_meta <- fish_obs |> 
+  group_by(uvs_station_id, diver, depth_strata, depth_m) |>
+  summarize(n_transects = n_distinct(transect)) |> 
+  ungroup() |> 
+  left_join(uvs_meta |> select(-team_lead)) |> 
+  mutate(method = "Fish surveys",
+         diver = case_when(diver == "AMF" ~ "Alan Friedlander",
+                           diver == "JSM" ~ "Juan Mayorga"),
+         ps_station_id = str_replace(uvs_station_id,  "uvs", "fish")) |> 
+  mutate(depth_strata = case_when(depth_m <= 5 ~ "Supershallow",
+                                  depth_m <= 15 ~ "Shallow",
+                                  depth_m > 15 ~ "Deep")) |> 
+  select(expedition, method, ps_station_id, location, date, local_time, lat, lon, habitat, exposure, depth_strata, depth_m, diver, n_transects, alternative_station_id = alternative_site_id,  everything(), - uvs_station_id) |> 
+  ungroup() |> 
+  arrange(ps_station_id)
+```
+
+```{r bq_upload}
+bq_table_create("pristine-seas.metadata.NIU_2023_fish", 
+                fields = as_bq_fields(fish_meta))
+
+bigrquery::bq_table_upload("pristine-seas.metadata.NIU_2023_fish", 
+                           values = fish_meta, fields = fish_meta)
+```
+
+# Benthos 
+
+```{r}
+lpi_transects <- readxl::read_xlsx(file.path(exp_path,
+                                            "data/primary/raw/benthos/NIUE_2023_Transsects-rough.xlsx"),
+                                  n_max = 2, 
+                                  col_names = FALSE) %>%
+  janitor::clean_names() %>%
+  column_to_rownames(var = "x1") %>% 
+  t() %>% 
+  as_tibble() %>% 
+  remove_rownames() %>% 
+  janitor::clean_names() |> 
+  set_names(c("site_number", "depth_m")) |> 
+  mutate(ps_site_id = paste0("NIU_2023_uvs_",
+                             formatC(as.numeric(str_extract(site_number, "[0-9]+")), width = 2,flag = 0))) |>
+  group_by(ps_site_id, depth_m) |> 
+  mutate(transect = LETTERS[row_number()]) |> 
+  ungroup() 
+
+lpi_transects <- lpi_transects |> 
+  mutate(depth_m = as.numeric(depth_m),
+         method = "Benthic LPI",
+         depth_strata = case_when(depth_m <= 5 ~ "Supershallow",
+                                  depth_m <= 15 ~ "Shallow",
+                                  depth_m > 15 ~ "Deep"),
+         paired_station_id = str_replace_all(ps_site_id, "uvs", "fish"),
+         ps_station_id = str_replace_all(ps_site_id, "uvs", "lpi")) |> 
+  group_by(method, ps_station_id,depth_strata, depth_m, paired_station_id, ps_site_id) |> 
+  summarize(n_transects = n_distinct(transect)) 
+
+lpi_meta <- lpi_transects |> 
+  left_join(distinct(uvs_meta), 
+            by = c("ps_site_id" = "uvs_station_id")) |> 
+  mutate(diver = "Kike Ballesteros") |> 
+    select(expedition, method, ps_station_id, location, date, local_time, lat, lon, habitat, exposure, depth_strata, depth_m,  n_transects, everything(), -ps_site_id, -alternative_site_id, -team_lead)
+
+bq_table_create("pristine-seas.metadata.NIU_2023_lpi", 
+                fields = as_bq_fields(lpi_meta))
+
+bigrquery::bq_table_upload("pristine-seas.metadata.NIU_2023_lpi", 
+                           values = lpi_meta, fields = lpi_meta)
+```
