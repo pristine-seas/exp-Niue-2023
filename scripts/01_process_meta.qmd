@@ -42,9 +42,11 @@ uvs_meta <- uvs_meta |>
          local_time = hms::as_hms(local_time),
          alternative_site_id = if_else(!is.na(alternative_site_id), 
                                        paste0("NIU_2016_uvs_", alternative_site_id),
-                                       NA_character_)) |> 
-  select(expedition, method, ps_station_id, location = island,  date, local_time, lat, lon, habitat, 
-         exposure, team_lead, alternative_site_id)
+                                       NA_character_),
+         team_lead = case_when(team_lead == "AMF" ~ "Alan Friedlander",
+                               team_lead == "JSM" ~ "Juan Mayorga")) |> 
+  select(expedition, method, ps_station_id, location = island, date, local_time, lat, lon, habitat, 
+         exposure, alternative_site_id, team_lead)
 ```
 
 ```{r birds}
