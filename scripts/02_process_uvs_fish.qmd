@@ -807,7 +807,7 @@ tmp_plot <- biomass_by_taxa |>
                                       tooltip = tooltip))+
   paletteer::scale_colour_paletteer_d("ggthemes::Tableau_10")+
   scale_y_log10()+
-  labs(y = "Abundance (Ind x 100m2)", x = "Frequency (% station-strata)", col = "Trophic group", size = "Biomas")+
+  labs(y = "Abundance (Ind x 100m2)", x = "Frequency (% station-strata)", col = "Trophic group", size = "Biomass")+
   ggthemes::theme_hc()+
   theme(legend.title.position = "top", legend.position = "right")
 
