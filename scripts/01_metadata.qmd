@@ -28,10 +28,14 @@ exp_path <- file.path(ps_science_path, "expeditions", "Niue-2023")
 
 ps_data_path <- file.path(ps_science_path, "datasets/")
 
+bq_auth(email = "marine.data.science@ngs.org")
+
 bq_connection <- dbConnect(bigquery(), project = "pristine-seas")
 ```
 
-# Fish 
+# Clean up
+
+## Fish 
 
 ```{r uvs}
 uvs_meta <- readxl::read_xlsx(file.path(exp_path, 
@@ -40,7 +44,7 @@ uvs_meta <- readxl::read_xlsx(file.path(exp_path,
 
 uvs_meta <- uvs_meta |> 
   mutate(expedition = "NIU_2023", 
-         uvs_station_id = str_replace(ps_site_id, "NIU", "NIU_2023") |>
+         uvs_site_id = str_replace(ps_site_id, "NIU", "NIU_2023") |>
            str_replace("UVS", "uvs"),
          date = lubridate::dmy(dd_mm_yyyy),
          local_time = hms::as_hms(local_time),
@@ -48,7 +52,7 @@ uvs_meta <- uvs_meta |>
          alternative_site_id = if_else(!is.na(alternative_site_id) & alternative_site_id != "NA", 
                                        paste0("NIU_2016_uvs_", alternative_site_id),
                                        NA_character_)) |> 
-  select(expedition,  uvs_station_id, location = island, date, local_time, lat, lon,
+  select(expedition,  uvs_site_id, location = island, date, local_time, lat, lon,
          habitat, exposure, team_lead, alternative_site_id, everything(), 
          -dd_mm_yyyy, -sand_station_id, -sand_station_depth, -ps_site_id)
 ```
@@ -63,22 +67,22 @@ jsm_fish_obs <- readxl::read_xlsx(file.path(exp_path, "data/primary/raw/fish/NIU
   as_tibble() 
   
 fish_obs <- bind_rows(amf_fish_obs, jsm_fish_obs) |> 
-  mutate(uvs_station_id = str_replace(ps_site_id, "NIU", "NIU_2023") |>
+  mutate(uvs_site_id = str_replace(ps_site_id, "NIU", "NIU_2023") |>
            str_replace("UVS", "uvs")) 
 
 fish_meta <- fish_obs |> 
-  group_by(uvs_station_id, diver, depth_strata, depth_m) |>
+  group_by(uvs_site_id, diver, depth_strata, depth_m) |>
   summarize(n_transects = n_distinct(transect)) |> 
   ungroup() |> 
   left_join(uvs_meta |> select(-team_lead)) |> 
   mutate(method = "Fish surveys",
          diver = case_when(diver == "AMF" ~ "Alan Friedlander",
                            diver == "JSM" ~ "Juan Mayorga"),
-         ps_station_id = str_replace(uvs_station_id,  "uvs", "fish")) |> 
+         ps_station_id = str_replace(uvs_site_id,  "uvs", "fish")) |> 
   mutate(depth_strata = case_when(depth_m <= 5 ~ "Supershallow",
                                   depth_m <= 15 ~ "Shallow",
                                   depth_m > 15 ~ "Deep")) |> 
-  select(expedition, method, ps_station_id, location, date, local_time, lat, lon, habitat, exposure, depth_strata, depth_m, diver, n_transects, alternative_station_id = alternative_site_id,  everything(), - uvs_station_id) |> 
+  select(expedition, method, ps_station_id, location, date, local_time, lat, lon, habitat, exposure, depth_strata, depth_m, n_transects, uvs_site_id , alternative_site_id = alternative_site_id, notes, diver) |> 
   ungroup() |> 
   arrange(ps_station_id)
 ```
@@ -91,7 +95,7 @@ bigrquery::bq_table_upload("pristine-seas.metadata.NIU_2023_fish",
                            values = fish_meta, fields = fish_meta)
 ```
 
-# Benthos 
+## Benthos 
 
 ```{r}
 lpi_transects <- readxl::read_xlsx(file.path(exp_path,
@@ -105,9 +109,9 @@ lpi_transects <- readxl::read_xlsx(file.path(exp_path,
   remove_rownames() %>% 
   janitor::clean_names() |> 
   set_names(c("site_number", "depth_m")) |> 
-  mutate(ps_site_id = paste0("NIU_2023_uvs_",
+  mutate(uvs_site_id = paste0("NIU_2023_uvs_",
                              formatC(as.numeric(str_extract(site_number, "[0-9]+")), width = 2,flag = 0))) |>
-  group_by(ps_site_id, depth_m) |> 
+  group_by(uvs_site_id, depth_m) |> 
   mutate(transect = LETTERS[row_number()]) |> 
   ungroup() 
 
@@ -117,16 +121,15 @@ lpi_transects <- lpi_transects |>
          depth_strata = case_when(depth_m <= 5 ~ "Supershallow",
                                   depth_m <= 15 ~ "Shallow",
                                   depth_m > 15 ~ "Deep"),
-         paired_station_id = str_replace_all(ps_site_id, "uvs", "fish"),
-         ps_station_id = str_replace_all(ps_site_id, "uvs", "lpi")) |> 
-  group_by(method, ps_station_id,depth_strata, depth_m, paired_station_id, ps_site_id) |> 
-  summarize(n_transects = n_distinct(transect)) 
+         ps_station_id = str_replace_all(uvs_site_id, "uvs", "lpi")) |> 
+  group_by(method, ps_station_id, depth_strata, depth_m, uvs_site_id) |> 
+  summarize(n_transects = n_distinct(transect)) |> 
+  ungroup()
 
 lpi_meta <- lpi_transects |> 
-  left_join(distinct(uvs_meta), 
-            by = c("ps_site_id" = "uvs_station_id")) |> 
+  left_join(distinct(uvs_meta)) |> 
   mutate(diver = "Kike Ballesteros") |> 
-    select(expedition, method, ps_station_id, location, date, local_time, lat, lon, habitat, exposure, depth_strata, depth_m,  n_transects, everything(), -ps_site_id, -alternative_site_id, -team_lead)
+  select(expedition, method, ps_station_id, location, date, local_time, lat, lon, habitat, exposure, depth_strata, depth_m,  n_transects, everything(), alternative_site_id, -team_lead, diver)
 
 bq_table_create("pristine-seas.metadata.NIU_2023_lpi", 
                 fields = as_bq_fields(lpi_meta))
@@ -134,3 +137,376 @@ bq_table_create("pristine-seas.metadata.NIU_2023_lpi",
 bigrquery::bq_table_upload("pristine-seas.metadata.NIU_2023_lpi", 
                            values = lpi_meta, fields = lpi_meta)
 ```
+
+## Benthic Bruvs
+
+```{r bruvs}
+bruvs_meta <- readxl::read_xlsx(file.path(exp_path,
+                                        "data/primary/raw/bruvs/NIU_2023_bruvs_fieldbook.xlsx")) |> 
+  janitor::clean_names()
+
+bruvs_meta <- bruvs_meta |> 
+  mutate(expedition = "NIU_2023", 
+         method = "Benthic BRUVS",
+         team_lead = "Jess Cramp",
+         ps_station_id = paste0("NIU_2023_bbruv_", 
+                                formatC(drop, width = 2, format = "d", flag = "0")),
+         across(c(date), lubridate::ymd),
+         across(c(time_out, time_in), hms::as_hms),
+         location = case_when(str_detect(site, "AN") ~ "Antiope",
+                              str_detect(site, "BV") ~ "Beveridge reef",
+                              TRUE ~ "Niue"))  |> 
+      select(expedition, method, ps_station_id, location, date, time_in, time_out, lat, 
+             lon = long, depth_m,  team_lead)
+
+bruvs_meta$location[bruvs_meta$location == "Beveridge reef"] <- "Beveridge"
+```
+
+```{r}
+bq_table_create("pristine-seas.metadata.NIU_2023_bbruv", 
+                fields = as_bq_fields(bruvs_meta))
+
+bigrquery::bq_table_upload("pristine-seas.metadata.NIU_2023_bbruv", 
+                           values = bruvs_meta, fields = bruvs_meta)
+```
+
+## Birds
+
+```{r birds}
+birds_meta <- readxl::read_xlsx(file.path(exp_path,
+                                        "data/primary/raw/birds/NIU_2023_birds_fieldbook.xlsx"),
+                                sheet = "Bird transects",range = "A1:N63") |> 
+  janitor::clean_names()
+
+birds_meta <- birds_meta |> 
+  mutate(expedition = "NIU_2023", 
+         method = "Seabird survey",
+         team_lead = "Chris Thompson",
+         ps_station_id = str_replace(code, "NIU", "NIU_2023"),
+         across(c(date), lubridate::ymd),
+         across(c(time_start, time_stop), hms::as_hms),
+         duration = hms::hms(minutes  = duration_mins),
+         paired_station = pel_op_code) |> 
+  select(expedition, method, ps_station_id, location, date, time_start, time_stop, duration, 
+         lon_start = long_start, lat_start,  lon_stop = long_stop, lat_stop, distance_km, paired_station, team_lead,
+         everything(), -sublocation, -code, -duration_mins, -paired_pel, -pel_op_code)
+
+birds_meta$paired_station[birds_meta$paired_station == "-"] <- NA_character_
+
+birds_meta$location[birds_meta$location == "Antiope Seamount"] <- "Antiope"
+birds_meta$location[birds_meta$location == "Beveridge Reef"] <- "Beveridge"
+```
+
+```{r}
+bq_table_create("pristine-seas.metadata.NIU_2023_birds", 
+                fields = as_bq_fields(birds_meta))
+
+bigrquery::bq_table_upload("pristine-seas.metadata.NIU_2023_birds", 
+                           values = birds_meta, fields = birds_meta)
+```
+
+## DSCM
+
+```{r dscm}
+dscm_meta <- readxl::read_xlsx(file.path(exp_path,
+                                        "data/primary/raw/dscm/NIU_2023_dscm_fieldbook.xlsx"))
+
+dscm_meta <- dscm_meta |> 
+  mutate(expedition = "NIU_2023", 
+         method = "Deep sea cameras",
+         ps_station_id = str_replace(ps_station_id, "NIU", "NIU_2023"),
+         across(c(date_in, date_out), lubridate::ymd),
+         across(c(time_in, time_out, recording_time_hrs), hms::as_hms),
+         recording_time_hrs = hour(recording_time_hrs)) |> 
+  replace_na(list(team_lead = "Whitney Goodell")) |> 
+  select(expedition, method, ps_station_id, location, date_in, lon_in, lat_in,  time_in,
+         date_out, lon_out, lat_out, time_out, mission_duration_hrs, recording_time_hrs, depth_m, habitat, dscm_id,
+         everything(), -sublocation) 
+```
+
+```{r}
+bq_table_create("pristine-seas.metadata.NIU_2023_dscm", 
+                fields = as_bq_fields(dscm_meta))
+
+bigrquery::bq_table_upload("pristine-seas.metadata.NIU_2023_dscm", 
+                           values = dscm_meta, fields = dscm_meta)
+```
+
+## e-DNA
+
+```{r edna}
+edna_meta <- readxl::read_xlsx(file.path(exp_path,
+                                        "data/primary/raw/edna/NIU_2023_edna_fieldbook.xlsx")) |> 
+  janitor::clean_names()
+
+edna_meta <- edna_meta |> 
+  mutate(expedition = "NIU_2023", 
+         method = "Environmental DNA",
+         team_lead = "Molly Timmers",
+         ps_station_id = str_replace(ps_station_id, "NIU", "NIU_2023"),
+         paired_station_id = str_replace(paired_station_id, "NIU", "NIU_2023"),
+         across(c(date), lubridate::dmy),
+         across(c(filter_time, collection_time), hms::as_hms),
+         depth_strata = if_else(depth_m == 1, "Surface", "Bottom")) |> 
+  left_join(uvs_meta |> 
+              select(uvs_site_id, location, habitat, exposure, lat, lon), 
+            by = c("paired_station_id" = "uvs_site_id")) |> 
+    select(expedition, method, ps_station_id, ps_sample_id, location, date, lat, lon, habitat, exposure, depth_strata, depth_m, collection_time, filter_time, n_replicates, water_liters, preservative, filter_type, site_photos, daily_negative, everything(),team_lead, -mosaics)
+```
+
+```{r}
+bq_table_create("pristine-seas.metadata.NIU_2023_eDNA", 
+                fields = as_bq_fields(edna_meta))
+
+bigrquery::bq_table_upload("pristine-seas.metadata.NIU_2023_eDNA", 
+                           values = edna_meta, fields = edna_meta)
+```
+
+## Pelagics Bruvs
+
+```{r pelagics}
+pelagics_meta <- readxl::read_xlsx(file.path(exp_path,
+                                        "data/primary/raw/pelagics/NIU_2023_pelagics_fieldbook.xlsx"),
+                                sheet = "Pelagic meta") |> 
+  janitor::clean_names()
+
+pelagics_meta <- pelagics_meta |> 
+  mutate(expedition = "NIU_2023", 
+         method = "Pelagic BRUVS",
+         team_lead = "Chris Thompson",
+         ps_station_id = str_replace(string, "NIUP23", "NIU_2023_pbruv"),
+         across(c(date), lubridate::ymd),
+         across(c(time_in, time_out), hms::as_hms),
+         depth_m = 10) |> 
+    select(expedition, method, ps_station_id, opcode, location, date, time_in, time_out, 
+         lon_in = long_in, lat_in,  lon_out = long_out, lat_out, depth_m, rig, left_cam, right_cam, bait, team_lead,
+         scan_notes = notes, field_comments = note,
+         everything(), -string)
+
+pelagics_meta$location[pelagics_meta$location == "Antiope Seamount"] <- "Antiope"
+pelagics_meta$location[pelagics_meta$location == "Beveridge Reef"] <- "Beveridge"
+```
+
+```{r}
+bq_table_create("pristine-seas.metadata.NIU_2023_pbruv", 
+                fields = as_bq_fields(pelagics_meta))
+
+bigrquery::bq_table_upload("pristine-seas.metadata.NIU_2023_pbruv", 
+                           values = pelagics_meta, fields = pelagics_meta)
+```
+
+## Plastics
+
+```{r plastics}
+plastics_meta <- readxl::read_xlsx(file.path(exp_path,
+                                        "data/primary/raw/microplastics/NIU_2023_plastics_fieldbook.xlsx")) |> 
+  janitor::clean_names()
+
+plastics_meta <- plastics_meta |> 
+  mutate(expedition = "NIU_2023", 
+         method = "Microplastics",
+         collecting_method = "Bottle",
+         team_lead = "Whitney Goodell",
+         ps_station_id = str_replace(ps_station_id, "NIU", "NIU_2023"),
+         across(c(date), lubridate::ymd),
+         across(c(time), hms::as_hms)) |> 
+  select(expedition, method, ps_station_id, location, date, time, lat, lon,  depth_m, vol_ml, collecting_method, comments, team_lead)
+```
+
+```{r}
+bq_table_create("pristine-seas.metadata.NIU_2023_plastic", 
+                fields = as_bq_fields(plastics_meta))
+
+bigrquery::bq_table_upload("pristine-seas.metadata.NIU_2023_plastic", 
+                           values = plastics_meta, fields = plastics_meta)
+```
+
+## Sub
+
+```{r sub}
+sub_meta <- readxl::read_xlsx(file.path(exp_path,
+                                        "data/primary/raw/sub/NIU_2023_sub_fieldbook.xlsx")) |> 
+  janitor::clean_names()
+
+sub_meta <- sub_meta |> 
+  mutate(expedition = "NIU_2023", 
+         method = "Submersible dive",
+         ps_station_id = str_replace(ps_station_id, "NIU", "NIU_2023"),
+         date = lubridate::dmy(date_dd_mm_yyyy),
+         across(c(dive_start, resurface, bottom_time), hms::as_hms)) |>
+  select(expedition, method, ps_station_id, location, date, everything(), -date_dd_mm_yyyy) |> 
+  mutate(across(c(ends_with("longitude"), ends_with("latitude")) ,
+                ~str_remove_all(., "S|W") |> 
+                  str_trim() |> 
+                  str_squish() |> 
+                  str_replace_all(pattern = "\\'", replacement =  " "))) |> 
+  rowwise() |> 
+  mutate(across(c(ends_with("longitude"), ends_with("latitude")),
+                ~measurements::conv_unit(., from = 'deg_dec_min', to = 'dec_deg') |> 
+                  as.numeric() |> 
+                  round(digits = 4))) |> 
+  mutate(across(c(ends_with("longitude"), ends_with("latitude")),
+                ~.*-1)) |> 
+  select(expedition, method, ps_station_id, location, date, dive_start_time = dive_start, resurface_time = resurface, bottom_time, 
+         surface_start_lon = surface_start_longitude, surface_start_lat = surface_start_latitude,
+         bottom_start_lat = bottom_start_latitude, bottom_start_lon = bottom_start_longitude,
+         bottom_end_lat = bottom_end_latitude, bottom_end_lon = bottom_end_longitude,
+         surface_end_lon = surface_end_longitude, surface_end_lat = surface_end_latitude, 
+         max_depth_m = max_depth,
+         everything(), -collection, -dive_type) 
+```
+
+```{r}
+bq_table_create("pristine-seas.metadata.NIU_2023_sub", 
+                fields = as_bq_fields(sub_meta))
+
+bigrquery::bq_table_upload("pristine-seas.metadata.NIU_2023_sub", 
+                           values = sub_meta, fields = sub_meta)
+```
+
+## Shark tags
+
+```{r tagging}
+tags_meta <- readxl::read_xlsx(file.path(exp_path,
+                                        "data/primary/raw/tags/NIU_2023_sharktags_fieldbook.xlsx")) |> 
+  janitor::clean_names()
+
+tags_meta <- tags_meta |> 
+  mutate(expedition = "NIU_2023", 
+         method = "Shark tags",
+         team_lead = "Jess Cramp",
+         ps_station_id = paste0("NIU_2023_shark_", 
+                                formatC(row_number(), 
+                                        width = 2, 
+                                        flag = "0")),
+         lat = as.numeric(lat),
+         across(c(date), lubridate::dmy),
+         across(where(is.double), round, 4),
+         sex = if_else(sex == "m", "Male", "Female"),
+         location = case_when(str_detect(location, "anti") ~ "Antiope",
+                              str_detect(location, "bever") ~ "Beveridge reef",
+                              TRUE ~ "Niue"),
+         species = case_when(species == "c_amblyrhynchos" ~ "Carcharhinus amblyrhynchos",
+                             species == "c_galapagensis" ~ "Carcharhinus galapagensis",
+                             species == "c_longimanus" ~ "Carcharhinus longimanus",
+                             species == "c_falciformis" ~ "Carcharhinus falciformis",)) |> 
+        select(expedition, method, ps_station_id, location, date, lat, lon = long,  
+               species, id, sex, pcl_cm, fl_cm, tl_cm, clasper_in_cm, clasper_out_cm,
+               ac_tag_id, ac_tag_serial, sat_tag_serial, sat_tag_ptt, rel_cond, vial,
+               team_lead, everything(), -tagger_name, -shark_name, -gps, -waypt )
+
+tags_meta$location[tags_meta$location == "Beveridge reef"] <- "Beveridge"
+
+bq_table_create("pristine-seas.metadata.NIU_2023_tags", 
+                fields = as_bq_fields(tags_meta))
+
+bigrquery::bq_table_upload("pristine-seas.metadata.NIU_2023_tags", 
+                           values = tags_meta, fields = tags_meta)
+```
+
+## Consolidate
+
+```{r}
+shrd_cols <- c("expedition", "method", "ps_station_id", "location", "date", "local_time", "lat", "lon", "team_lead")
+
+exp_meta <- fish_meta |> 
+  rename("team_lead" = "diver") |> 
+  select(all_of(shrd_cols)) |>  
+  bind_rows(lpi_meta |> 
+              rename("team_lead" = "diver") |> 
+              select(all_of(shrd_cols))) |> 
+  bind_rows(bruvs_meta |> 
+              rename("local_time" = "time_in") |> 
+              select(all_of(shrd_cols))) |> 
+  bind_rows(birds_meta |> 
+              rename("local_time" = "time_start", 
+                     "lon" = "lon_start",
+                     "lat" = "lat_start") |> 
+              select(all_of(shrd_cols))) |> 
+  bind_rows(dscm_meta |> 
+              rename("local_time" = "time_in", 
+                     "lon" = "lon_in",
+                     "lat" = "lat_in",
+                     "date" = "date_in") |> 
+              select(all_of(shrd_cols))) |> 
+    bind_rows(edna_meta |> 
+              rename("local_time" = "collection_time") |>
+              select(all_of(shrd_cols))) |> 
+   bind_rows(pelagics_meta |> 
+              rename("local_time" = "time_in", 
+                     "lon" = "lon_in",
+                     "lat" = "lat_in") |> 
+              select(all_of(shrd_cols))) |> 
+     bind_rows(plastics_meta |> 
+              rename("local_time" = "time") |> 
+              select(all_of(shrd_cols))) |> 
+       bind_rows(sub_meta |> 
+              rename("local_time" = "dive_start_time",
+                     "lon" = "bottom_start_lon",
+                     "lat" = "bottom_start_lat",
+                     "team_lead" = "pilot") |> 
+              select(all_of(shrd_cols))) |> 
+         bind_rows(tags_meta |> 
+              select(any_of(shrd_cols)))
+```
+
+```{r}
+exp_meta |> 
+  group_by(method) |> 
+  naniar::miss_var_summary() |> 
+  filter(n_miss > 0)
+```
+
+```{r}
+bq_table_create("pristine-seas.metadata.NIU_2023", 
+                fields = as_bq_fields(exp_meta))
+
+bigrquery::bq_table_upload("pristine-seas.metadata.NIU_2023", 
+                           values = exp_meta, fields = exp_meta)
+```
+
+# Inspect
+
+```{r eval = TRUE}
+exp_meta <- tbl(bq_connection, "metadata.NIU_2023") |> 
+  arrange(ps_station_id) |>
+  collect()
+```
+
+```{r eval = TRUE, include = T}
+#| column: page
+library(mapview)
+
+exp_meta_shp <- exp_meta |> 
+  filter(!is.na(lat)) |> 
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) |> 
+  distinct(method, ps_station_id, location, geometry)
+
+mapview::mapview(exp_meta_shp, 
+                 zcol = c(method = "method"), 
+                 legend = TRUE,
+                 col.regions = paletteer_d("ggthemes::Tableau_10", 10),
+                 map.types = c("Esri.WorldImagery"),
+                 layer.name = "Methods",
+                 popup = leafpop::popupTable(exp_meta_shp,
+                                      zcol = c("method",
+                                               "ps_station_id",
+                                               "location")))
+```
+
+```{r, eval = TRUE, include = T}
+exp_meta |> 
+  filter(location != "Transit") |> 
+  group_by(location, method) |> 
+  summarize(n_stations = n_distinct(ps_station_id)) |> 
+  ungroup() |> 
+  pivot_wider(names_from = "location", values_from = "n_stations") |> 
+  gt::gt(rowname_col = "method") |> 
+  gt::tab_header(title = "Number of workstations in each island") 
+```
+
+```{r}
+exp_meta_shp |> 
+  sf::st_write(file.path(exp_path, "data/primary/processed/metadata/exp_meta.shp"))
+```
+

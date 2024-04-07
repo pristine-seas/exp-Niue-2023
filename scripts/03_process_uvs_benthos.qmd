@@ -716,14 +716,14 @@ ggplot() +
             panel.border = element_blank(),
             panel.grid = element_blank(),
             axis.line = element_line("gray25"),
-            text = element_text(size = 12, family = "Arial"),
+            text = element_text(size = 12),
             axis.text = element_text(size = 10, colour = "gray25"),
             axis.title = element_text(size = 12, colour = "gray25"),
             legend.key = element_blank())+
       PristineSeasR::scale_color_pristine_seas(palette = "alternative")+
       scale_alpha(range = c(0.6,1))
 
-ggsave(file.path(exp_path, "figures", "uvs_benthos_pcoa_by_taxa_by_location.png"), width = 13)
+ggsave(file.path(exp_path, "figures", "uvs_benthos_pcoa_by_taxa_by_location.pdf"), width = 13)
 ```
 
 #### By group 
@@ -819,14 +819,14 @@ ggplot() +
             panel.border = element_blank(),
             panel.grid = element_blank(),
             axis.line = element_line("gray25"),
-            text = element_text(size = 12, family = "Arial"),
+            text = element_text(size = 12),
             axis.text = element_text(size = 10, colour = "gray25"),
             axis.title = element_text(size = 12, colour = "gray25"),
             legend.key = element_blank())+
       PristineSeasR::scale_color_pristine_seas(palette = "alternative")+
       scale_alpha(range = c(0.6,1))
 
-ggsave(file.path(exp_path, "figures", "uvs_benthos_pcoa_by_group_by_location.png"), width = 13)
+ggsave(file.path(exp_path, "figures", "uvs_benthos_pcoa_by_group_by_location.pdf"), width = 13)
 ```
 
 ## Changes since 2016
