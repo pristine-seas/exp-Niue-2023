@@ -30,6 +30,8 @@ ps_data_path <- file.path(ps_science_path, "datasets/")
 bigrquery::bq_auth(email = "marine.data.science@ngs.org")
 
 bq_connection <- DBI::dbConnect(bigrquery::bigquery(), project = "pristine-seas")
+
+grep("Niue", OlsonNames(), value=TRUE)
 ```
 
 ```{r clean, eval = TRUE, include = T}
@@ -67,8 +69,8 @@ dscm_meta <- dscm_meta |>
          ballast_kg = round(as.numeric(ballast_kg)),
          bait_kg = round(as.numeric(bait_kg)),
          deployment_date = lubridate::ymd(deployment_date),
-         deployment_time = lubridate::ymd_hms(deployment_time, tz = "Indian/Maldives"),
-         recovery_time = lubridate::ymd_hms(recovery_time, tz = "Indian/Maldives"),
+         deployment_time = lubridate::ymd_hms(deployment_time, tz = "Pacific/Niue"),
+         recovery_time = lubridate::ymd_hms(recovery_time, tz = "Pacific/Niue"),
          recovery_date = lubridate::ymd(recovery_date),
          mission_duration = hms::as_hms(mission_duration),
          recording_time = hms::as_hms(recording_time))
@@ -164,10 +166,12 @@ dscm_colnames <- tbl(bq_connection, "pristine-seas.deep_sea_cameras.deployments"
   colnames() 
 
 dscm_meta <- dscm_meta |> 
-  mutate(sublocation = NA_character_) |> 
+  mutate(sublocation = NA_character_,
+         extech_expedition_id = NA_character_) |> 
   select(any_of(dscm_colnames))
 
 bigrquery::bq_table_upload("pristine-seas.deep_sea_cameras.deployments", 
                            values = dscm_meta, fields = dscm_meta, write_disposition = 'WRITE_APPEND')
 ```
+
 
