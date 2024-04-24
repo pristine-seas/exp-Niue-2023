@@ -333,7 +333,6 @@ ggstatsplot::ggbetweenstats(data = summary_by_strata, x = location, y = gr_m2,
                             xlab = "")
 ```
 
-
 ## By depth strata
 
 ```{r}
@@ -1121,19 +1120,20 @@ biomass_by_strata_combined |>
 
 ```{r}
 biomass_by_strata_combined |> 
-  filter(location != "Antiope") |> 
+  filter(location == "Niue") |> 
   ggplot()+
   geom_boxplot(aes(x = depth_strata, y = gr_m2, col = factor(year)))+
-  facet_wrap("location")+
+  #facet_wrap("location")+
   scale_fill_brewer(palette="Set1")+
-  labs(title = 'Changes in fish biomass between 2016 an 2023',
+  labs(title = 'Changes in fish biomass between 2016 and 2023',
+       subtitle = "Niue",
        y = expression(Fish~biomass~(g/m^{2})),
        x = "", fill = "", col = "")+
   paletteer::scale_color_paletteer_d(palette = "ggthemes::Superfishel_Stone")+
-  scale_y_continuous(limits = c(0,700))+
+  #scale_y_continuous(limits = c(0,700))+
   ggthemes::theme_hc()
 
-ggsave(file.path(exp_path, "figures/fish_biomass_2016_2023_boxplot_no_outliers.pdf"))
+ggsave(file.path(exp_path, "figures/fish_biomass_2016_2023_boxplot_no_outliers_niue.pdf"))
 ```
 
 ```{r }
