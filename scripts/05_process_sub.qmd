@@ -174,11 +174,9 @@ all_dives <- tbl(bq_connection, "pristine-seas.submersible.deepsee_dives") |>
   filter(!is.na(ps_site_id)) |> 
   collect()
 
-all_dives <- all_dives |> 
-  mutate(deepsee_dive_id = as.integer(deepsee_dive_id)) |> 
-  bind_rows(sub_meta) |> 
-  arrange(dive_start_time)
+sub_meta <- sub_meta |> 
+  select(any_of(colnames(all_dives)))
 
 bigrquery::bq_table_upload("pristine-seas.submersible.deepsee_dives", 
-                           values = all_dives, fields = all_dives, write_disposition = 'WRITE_APPEND')
+                           values = sub_meta, fields = sub_meta, write_disposition = 'WRITE_APPEND')
 ```
