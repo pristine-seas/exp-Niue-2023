@@ -345,8 +345,7 @@ sub_meta <- sub_meta |>
                 ~measurements::conv_unit(., from = 'deg_dec_min', to = 'dec_deg') |> 
                   as.numeric() |> 
                   round(digits = 4))) |> 
-  mutate(across(c(ends_with("longitude"), ends_with("latitude")),
-                ~.*-1)) |> 
+  mutate(across(c(ends_with("longitude"), ends_with("latitude")), ~.*-1)) |> 
   select(expedition, method, ps_station_id, location, date, dive_start_time = dive_start, resurface_time = resurface, bottom_time, 
          surface_start_lon = surface_start_longitude, surface_start_lat = surface_start_latitude,
          bottom_start_lat = bottom_start_latitude, bottom_start_lon = bottom_start_longitude,
